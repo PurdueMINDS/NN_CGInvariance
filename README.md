@@ -1,6 +1,6 @@
-# Neural Network Extrapolations with G-invariances from a Single Environment
+# Neural Networks for Learning Counterfactual G-Invariances from Single Environments
 
-This repository is the official implementation of [link anonymized]. 
+This repository is the official implementation of [Neural Networks for Learning Counterfactual G-Invariances from Single Environments](https://openreview.net/forum?id=7t1FcJUWhi3). 
 
 In this work, we introduce a novel learning framework for single-environment extrapolations, where invariance to transformation groups is mandatory even without evidence, unless the learner deems it inconsistent with the training data. We also introduce sequence and image extrapolation tasks that validate our framework. 
 
@@ -16,7 +16,7 @@ pip install -r requirements.txt
 
 
 
-## Invariant Subspaces Notebook
+## Tutorial Notebook
 For a quick tutorial on how the bases are obtained and used, check [cginvariance_example.ipynb](cginvariance_example.ipynb) (in case of rendering issues, download [cginvariance_example.html](cginvariance_example.html) and open in browser). 
 
 The bases found by Theorem 3 in the paper for groups on Images and Sequences are shown in [invariantSubspaces.ipynb](invariantSubspaces.ipynb).
