@@ -89,7 +89,7 @@ class CGConv2D(nn.Module):
         self.weights.data.uniform_(-stdv, stdv)
 
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            self.bias.data.zero_()
 
     def getBasis(self, precomputed_basis_folder="."):
         # Load/Compute basis for the given groups.

@@ -70,7 +70,7 @@ class CGSequenceLayer(nn.Module):
         self.weights.data.uniform_(-stdv, stdv)
 
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            self.bias.data.zero_()
 
     def getBasis(self, precomputed_basis_folder="."):
         # Using Wshape = (self.input_size, 1) instead of (self.input_size, d).
