@@ -18,6 +18,16 @@ import time
 
 
 class CGCNN(nn.Module, utils.GracefulKiller):
+    """
+    CG-invariant CNN.
+    The convolutional layers of the typical CNNs are replaced with CGConv2D layer.
+    Each CGConv2D layer takes as parameter (in addition to the kernel size, etc.) a list of m groups and
+         learns to be invariant to the groups that do not affect the label.
+    At the end of CGConv2D layers, we add a sum-pooling layer over the entire feature map (as the convolutional layers
+        had kernel sizes smaller than the image size). The neurons obtained at the end of the sum pooling layer are
+        CG-invariant (i.e., if the label is not affected by a group G, then the neuron is learnt to be G-invariant).
+    See Figure 6 in the paper for an example architecture.
+    """
     def __init__(self, **modelParams):
         super().__init__()
 
@@ -28,17 +38,21 @@ class CGCNN(nn.Module, utils.GracefulKiller):
         self.padding = modelParams.get("padding", 1)
         self.nOutputs = modelParams.get("nOutputs", 10)
 
+        # Folder name where the subspaces (the basis vectors) are stored.
         self.precomputedBasisFolder = modelParams.get("precomputedBasisFolder", ".")
+        _log = utils.getLogger()
 
+        # For each layer, get the list of group names (for example, [rotation, flip])
         listInvariantTransforms = modelParams.get("listInvariantTransforms", [None] * 4)
         listInvariantTransforms = [
             ["trivial"] if it is None or it == [] else it
             for it in listInvariantTransforms
         ]
 
-        _log = utils.getLogger()
         _log.info(f"Invariant transforms for layers: {listInvariantTransforms}")
 
+        # For each layer and for each group, get the respective Reynolds operator function
+        # Example: "rotation" -> IS.G_rotation
         listInvariantTransforms = [
             IS.getTransformationsFromNames(it) for it in listInvariantTransforms
         ]
@@ -46,10 +60,12 @@ class CGCNN(nn.Module, utils.GracefulKiller):
 
         os.makedirs(self.precomputedBasisFolder, exist_ok=True)
 
+        # Strength and temperature for the penalty.
         self.penaltyAlpha = modelParams.get("penaltyAlpha", 0)
         self.penaltyMode = modelParams.get("penaltyMode", "simple")
         self.penaltyT = modelParams.get("penaltyT", 1)
 
+        # Different architectures
         architecture = modelParams.get("architecture", "simple")
         if architecture == "simple":
             architecture = [10, 10, 'M', 20, 20, 'M']
@@ -81,6 +97,7 @@ class CGCNN(nn.Module, utils.GracefulKiller):
                 layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
                 featureSize = (featureSize - 2) // 2 + 1
             else:
+                # Add CGConv2D layers instead of standard Conv2D.
                 layer = CGConv2D(
                     currentInputChannels,
                     layerSize,
@@ -105,6 +122,7 @@ class CGCNN(nn.Module, utils.GracefulKiller):
 
     def forward(self, x):
         x = self.convLayers(x)
+        # Sum pooling over the entire feature map.
         x = x.sum(dim=[-2, -1], keepdim=False)  # torch.Size([64, 80])
         x = x.view(x.shape[0], -1)  # torch.Size([64, 80])
         x = F.relu(self.fc1(x))  # torch.Size([64, 50])
@@ -113,6 +131,7 @@ class CGCNN(nn.Module, utils.GracefulKiller):
         return F.log_softmax(x, dim=1)
 
     def computePenalty(self):
+        # Compute penalty for each CGConv2D layer.
         penalty = torch.tensor(0.0)
         if self.penaltyAlpha > 0:
             penalty = []

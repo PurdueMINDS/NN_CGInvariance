@@ -118,6 +118,7 @@ class SumTaskDataset(SequenceDataset):
         )
 
         if inputTransform:
+            # Training input is sorted. Test input is not.
             input = np.apply_along_axis(inputTransform, 1, input)
 
         output = np.apply_along_axis(outputFunc, 1, input).reshape(-1, 1)
@@ -151,6 +152,7 @@ class EvenMinusOddSumTaskDataset(SequenceDataset):
             range(vocabularyRange[1]//2, vocabularyRange[1]), (nSamples//2, sequenceLength), replace=True
         )
         if inputTransform:
+            # Training input is sorted (increasing/decreasing). Test input is not.
             input = np.apply_along_axis(inputTransform, 1, input)
             input2 = np.apply_along_axis(inputTransform, 1, input2)[:, ::-1].copy()
         input = np.concatenate([input, input2], axis=0)
@@ -188,6 +190,7 @@ class Sum2TaskDataset(SequenceDataset):
             range(vocabularyRange[1]//2, vocabularyRange[1]), (nSamples//2, sequenceLength), replace=True
         )
         if inputTransform:
+            # Training input is sorted (increasing/decreasing). Test input is not.
             input = np.apply_along_axis(inputTransform, 1, input)
             input2 = np.apply_along_axis(inputTransform, 1, input2)[:, ::-1].copy()
 

@@ -12,6 +12,13 @@ import os
 loadedBases = {}
 
 class CGConv2D(nn.Module):
+    """
+    CG-invariant Conv2D layer.
+    Each CGConv2D layer takes as parameter (in addition to the kernel size, etc.) a list of m groups (respective Reynolds
+    operator functions). After loading the basis for all subspaces (using invariantSubspaces module), the kernel for
+    this layer is constructed as a linear combination of these bases (with learnable coefficients). The output is given
+    as the standard convolution of this kernel with the input.
+    """
     def __init__(
         self,
         in_channels,
@@ -37,6 +44,9 @@ class CGConv2D(nn.Module):
         self.kernel_size = kernel_size
         self.stride = stride
         self.padding = padding
+
+        # A list of m groups for this layer given in the form of their respective Reynolds operator function
+        # For example: [IS.G_rotation, IS.G_flip]
         self.invariant_transforms = invariant_transforms
         self.penaltyAlpha = penaltyAlpha
 
@@ -49,6 +59,7 @@ class CGConv2D(nn.Module):
             self.Wshape = self.kernel_size
             sameBasisAcross = self.in_channels
 
+        # Load the basis from the specified folder.
         basisFileName = IS._getBasisFileName(listT=self.invariant_transforms, Wshape=self.Wshape)
         if basisFileName not in loadedBases:
             self.invariant_transforms, basisList, self.basisConfigs = self.getBasis(precomputed_basis_folder)
@@ -59,8 +70,7 @@ class CGConv2D(nn.Module):
 
         self.invariant_transforms, self.basisConfigs, self.basisShapes, self.basis = loadedBases[basisFileName]
 
-        # The dimension one at the end is needed in the tensor, as we will use it to broadcast the
-        #   coefficient parameters over the basis dimension
+        # Weights are the parameters of the linear combination corresponding to each basis vector.
         self.weights = nn.Parameter(torch.Tensor(out_channels, sameBasisAcross, self.basis.shape[0], 1))
 
         if bias:
@@ -70,6 +80,7 @@ class CGConv2D(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
+        # Initialize weights and biases.
         n = self.in_channels
         for k in self.kernel_size:
             n *= k
@@ -78,9 +89,10 @@ class CGConv2D(nn.Module):
         self.weights.data.uniform_(-stdv, stdv)
 
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            self.bias.data.zero_()
 
     def getBasis(self, precomputed_basis_folder="."):
+        # Load/Compute basis for the given groups.
         listT, basis, basisConfigs = IS.getAllBasis(
             folder=precomputed_basis_folder,
             listT=self.invariant_transforms,
@@ -94,6 +106,7 @@ class CGConv2D(nn.Module):
         if self.basis.device != input.device:
             self.basis = self.basis.to(input.device)
 
+        # Obtain the kernel as a linear combination of weights and the bases.
         fullSub = torch.mul(self.weights, self.basis)
         fullSub = fullSub.sum(dim=-2)
 
@@ -108,6 +121,7 @@ class CGConv2D(nn.Module):
 
         # Input shape: torch.Size([minibatch, in_channels, iH, iW])
 
+        # Convolve the kernel obtained above with the input
         # Output shape: torch.Size([minibatch, out_channels, oH, oW])
         out = F.conv2d(
             input, weight=fullSub, bias=None, stride=self.stride, padding=self.padding
@@ -121,6 +135,8 @@ class CGConv2D(nn.Module):
         return out
 
     def penalty(self, mode=None, T=None):
+        # Penalty depends on the invariances of subspaces that were used.
+        # Penalty is the least if only the fully invariant subspace is used.
         return IUtils.invariancePenalty(self, mode=mode, T=T)
 
 if __name__ == '__main__':

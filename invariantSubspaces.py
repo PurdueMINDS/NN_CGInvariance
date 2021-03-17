@@ -10,19 +10,19 @@ from Common import utils
 from hashlib import sha1
 
 def G_trivial(Wmat):
-    # Trivial group
+    """
+    No transformation applied to Wmat.
+    """
     return Wmat
 
-def G_permutation(Wmat, pos):
-    # Transposition group = {e, (i j)}
-    permut = list(range(Wmat.shape[0]))
-    permut[pos[0]], permut[pos[1]] = permut[pos[1]], permut[pos[0]]
-    return (Wmat + Wmat[permut]) / 2
-
-
+################# Reynolds operator for groups over images ###################
 def G_rotation(Wmat):
-    # Rotation group: {T_0, T_90, T_180, T_270}
-    # Wmat can be either (C, H, W) or (H, W)
+    """
+     Apply the Reynolds operator of the rotation group: {T_0, T_90, T_180, T_270} to Wmat
+        (average over all the rotation transformations).
+    :param Wmat: of shape (channels, height, width) or (height, width)
+    :return: Matrix of same shape as Wmat transformed by the Reynolds operator of rotation group.
+    """
     if len(Wmat.shape) == 3:
         axes = (1,2)
     else:
@@ -40,16 +40,22 @@ def G_rotation(Wmat):
 
 
 def G_color_permutation(Wmat):
-    # Color permutation group
-    # Wmat has to be (C, H, W)
+    """
+     Apply the Reynolds operator of the RGB channel permutation group to Wmat.
+    :param Wmat: of shape (channels, height, width)
+    :return: Transformed matrix of same shape as Wmat.
+    """
     assert Wmat.shape[1] == Wmat.shape[2]
     nChannels = Wmat.shape[0]
     return Wmat.mean(axis=0, keepdims=True).repeat(nChannels, axis=0)
 
 
 def G_horizontalFlip(Wmat):
-    # Horizontal flip group: {e, T_h}
-    # Wmat can be either (C, H, W) or (H, W)
+    """
+     Apply the Reynolds operator of the horizontal flip group: {e, T_h} to Wmat.
+    :param Wmat: of shape (channels, height, width) or (height, width)
+    :return: Transformed matrix of same shape as Wmat.
+    """
     if len(Wmat.shape) == 3:
         axes = (1,2)
     else:
@@ -60,8 +66,11 @@ def G_horizontalFlip(Wmat):
 
 
 def G_verticalFlip(Wmat):
-    # Vertical flip group: {e, T_v}
-    # Wmat can be either (C, H, W) or (H, W)
+    """
+     Apply the Reynolds operator of the vertical flip group: {e, T_v} to Wmat.
+    :param Wmat: of shape (channels, height, width) or (height, width)
+    :return: Transformed matrix of same shape as Wmat.
+    """
     if len(Wmat.shape) == 3:
         axes = (1,2)
     else:
@@ -73,8 +82,12 @@ def G_verticalFlip(Wmat):
 
 
 def G_flip(Wmat):
-    # Flip group: {e, T_h, T_v, T_180}  (Have to include T_180 to make it a group).
-    # Wmat can be either (C, H, W) or (H, W)
+    """
+     Apply the Reynolds operator of the flip group: {e, T_h, T_v, T_180} to Wmat.
+        (have to include T_180 to make it a group).
+    :param Wmat: of shape (channels, height, width) or (height, width)
+    :return: Transformed matrix of same shape as Wmat.
+    """
     if len(Wmat.shape) == 3:
         axes = (1,2)
     else:
@@ -85,6 +98,23 @@ def G_flip(Wmat):
             + np.flip(Wmat, axis=axes[1])
             + np.rot90(Wmat, k=2, axes=axes)) / 4
 
+################################################################################
+
+
+############## Reynolds operator for groups over sequences #####################
+def G_permutation(Wmat, pos):
+    """
+     Apply the Reynolds operator of the Transposition group = {e, (i j)} to Wmat
+        where  (i j) swaps Wmat[i] and Wmat[j]. Only the first dimension of Wmat is considered for swap.
+    :param Wmat: of shape (sequence_length, sequence_dimension) for Sequences
+    :param pos: Positions to swap: [i, j]
+    :return: Matrix of same shape as Wmat after the transformation.
+    """
+    permut = list(range(Wmat.shape[0]))
+    permut[pos[0]], permut[pos[1]] = permut[pos[1]], permut[pos[0]]
+    return (Wmat + Wmat[permut]) / 2
+
+################################################################################
 
 def getTransformationsFromNames(names):
     mappingDict = {
@@ -98,34 +128,48 @@ def getTransformationsFromNames(names):
 
     return [mappingDict[name.lower()] for name in names]
 
+
+################################### Invariant Subspaces ########################################
 def projectAndRemove(A, B):
-    # Remove projection of A on B from A.
-    # Assumes B is orthonormal.
+    """
+    Given two matrices A and B (basis vectors in columns), remove the projection of A on B from A.
+    Assumes that B is orthonormal.
+    :return:
+    """
     for i in range(A.shape[1]):
         A[:, i] -= (B @ B.T) @ A[:, i]
     return A
 
 
-def constructTbar_rand(i, transformation, Wshape):
-    # Construct the Reynolds operator for the group (given by `transformation` function, e.g. G_rotation)
-    radius = np.random.uniform(0, 1, size=1)
-    rndW = radius * np.random.normal(0, 1, size=Wshape)
-    SrndW = transformation(rndW)
-    return SrndW.reshape(np.prod(Wshape))
-
 def constructTbar_onehot(i, transformation, Wshape):
+    """
+    Construct the matrix form of the Reynolds operator for a particular group.
+    (via one-hot vectors)
+    :param i: An integer denoting which column of the Reynolds operator matrix to construct
+              (matrix is computed in parallel for all i).
+    :param transformation: The function form of Reynolds operator of the group, e.g., G_rotation.
+    :param Wshape: Shape of the input/weights. For instance for images, Wshape=(channels, kernel_size, kernel_size).
+    :return: The i-th column of the matrix corresponding to the Reynolds operator of the given group.
+    """
     rndW = np.zeros(np.prod(Wshape))
     rndW[i] = 1
 
     SrndW = transformation(rndW.reshape(*Wshape))
     return SrndW.reshape(np.prod(Wshape))
 
-def getInvariantSubspace(Wshape, transformation, method="onehot"):
+def getInvariantSubspace(Wshape, transformation):
+    """
+    Given the function form of the Reynolds operator of a group, e.g., G_rotation, obtain its left 1-eigenspace.
+    :param Wshape: Shape of the input/weights.
+                    For instance for images, Wshape=(channels, kernel_size, kernel_size).
+                                 for sequences, Wshape=(sequence_length, dimension).
+    :param transformation: The function form of Reynolds operator of the group, e.g., G_rotation.
+    :return: Returns the left 1-eigenspace of shape (np.prod(Wshape), numEigenvectors),
+                its complement and the eigenvalues.
+    """
+
     Wsize = np.prod(Wshape)
-    if method == "rand":
-        max_samples = 100 * Wsize
-    else:
-        max_samples = Wsize
+    max_samples = Wsize
 
     try:
         ncpus = int(os.environ["SLURM_JOB_CPUS_PER_NODE"])
@@ -137,34 +181,38 @@ def getInvariantSubspace(Wshape, transformation, method="onehot"):
 
     pool = tmp.Pool(ncpus)
 
-    if method == "rand":
-        ans = pool.map(
-            partial(constructTbar_rand, transformation=transformation, Wshape=Wshape),
-            list(range(max_samples)),
-        )
-    else:
-        ans = pool.map(
-            partial(constructTbar_onehot, transformation=transformation, Wshape=Wshape),
-            list(range(max_samples))
-        )
+    ans = pool.map(
+        partial(constructTbar_onehot, transformation=transformation, Wshape=Wshape),
+        list(range(max_samples))
+    )
     pool.close()
     pool.join()
 
     # Reynolds operator for the transformation
     Tbar = np.stack(ans, axis=1)
 
-    # Eigenvectors
-    # Tbar symmetric
-    _, S, Vh = np.linalg.svd(Tbar, hermitian=True)
+    # Eigenvectors of Tbar (symmetric)
+    # Eigenvalues are in columns arranged in ascending order, 1-eigenvectors at the end.
+    S, Vh = np.linalg.eigh(Tbar)
+
     rank = np.linalg.matrix_rank(np.diag(S), hermitian=True)
 
-    # V: Eigenvectors associated with eigenvalue 1
-    V = Vh[:rank, :]
-    Vc = Vh[rank:, :]
+    # V: Eigenvectors associated with eigenvalue 1 and Vc is the complement space.
+    V = Vh[:, -rank:]
+    Vc = Vh[:, :-rank]
 
-    return V.T, Vc.T, S
+    return V, Vc, S
 
 def showSubspace(subspace, Wshape, ndim=-1, channels=False):
+    """
+    Visualize a subspace.
+    :param subspace: Subspace to visualize (for example obtained from `getInvariantSubspace` function).
+                     Each column corresponds to a basis vector of the subspace.
+    :param Wshape: Shape of the input/weights.
+    :param ndim: Number of basis vectors to visualize
+    :param channels: For images, visualize the channels separately or together as an RGB image.
+    :return: None
+    """
     subspace = subspace.T
 
     if ndim == -1:
@@ -202,7 +250,14 @@ def showSubspace(subspace, Wshape, ndim=-1, channels=False):
 
 
 def _findIntersection(U, V, method=1, decimals=6):
-    # Columns of vectors in U and V: column space defines the subspace.
+    """
+    Find the intersection of subspaces U and V.
+    :param U: Matrix with basis vectors of the subspace U in the columns.
+    :param V: Matrix with basis vectors of the subspace V in the columns.
+    :param method: Alternate methods for finding the intersection.
+    :param decimals: Precision
+    :return: Intersection subspace U \cap V.
+    """
     if method == 1:
         X = np.concatenate([U, V], axis=1)
         coeffs = slinalg.null_space(X)
@@ -220,13 +275,19 @@ def _findIntersection(U, V, method=1, decimals=6):
 
 
 def findIntersection(listV, method=1, decimals=6):
-    # Columns of vectors all V in listV: column space defines the subspace.
+    """
+    Find the intersection of a list of subspaces.
+    :param listV: listV[i] contains a matrix corresponding to the subspace V_i.
+    :param method: Alternate methods for finding the intersection.
+    :param decimals: Precision
+    :return: Intersection subspace V_0 \cap V_1 \ldots \cap V_{n-1}.
+    """
     if method == 1:
         intersection = listV[0]
         for V in listV[1:]:
             intersection = _findIntersection(intersection, V, method=method, decimals=decimals)
     else:
-        # intersection(A, B, ... ) = (join(A_c, B_c, ...))_c
+        # intersection(A, B, ... ) = (join(A_c, B_c, ...))_c, where _c denotes complement.
         listVc = [complement(V) for V in listV]
         joinListVc = np.concatenate(listVc, axis=1)
         intersection = complement(joinListVc)
@@ -235,25 +296,50 @@ def findIntersection(listV, method=1, decimals=6):
     return intersection
 
 def complement(A):
+    """
+    Complement of a subspace A.
+    :param A: Matrix with basis vectors of the subspace A in the columns.
+    :return: Complement subspace of A.
+    """
     return slinalg.null_space(A.T)
 
 def _sortTransforms(listT):
+    """
+    Sort a given list of functions lexicographically by name
+    (used to get unique filenames.)
+    :param listT: List of functions (e.g., [G_rotation, G_flip]).
+    :return: List lexicographically sorted.
+    """
     return sorted(listT, key=lambda f: f.__name__)
 
 
-def indexPowerSetGeneral(groups):
-    s = list(range(len(groups)))
+def indexPowerSetGeneral(listT):
+    """
+    Obtain a generator to iterate over the power set of listT (i.e., the different subsets of listT) in the
+    descending order of their sizes.
+    :param listT: List of Reynolds operator transformations for various groups (e.g., [G_rotation, G_flip]).
+    :return: A generator to iterate over the power set of listT (i.e., the different subsets of listT).
+    """
+    s = list(range(len(listT)))
     return itertools.chain.from_iterable(itertools.combinations(s, r) for r in range(len(s), -1, -1))
 
-def indexPowerSetTranspositions(groups):
-    s = list(groups)
+def indexPowerSetTranspositions(listT):
+    """
+    As with `indexPowerSetGeneral`, obtain a generator to iterate over the power set of listT, but assuming that
+    listT contains the Reynolds operators of the \binom{n}{2} transposition groups (i.e., G_permutation for different
+    values of (i j)). In this special case, we can iterate over the power set more efficiently as many of these subsets
+    have null intersection and can be ignored.
+    :param listT: List of Reynolds operator transformations for transposition groups.
+    :return: A generator to iterate over the power set of listT (i.e., the different subsets of listT).
+    """
+    s = list(listT)
     yield list(range(len(s)))
 
     position = 0
-    while position * (position - 1)//2 < len(groups):
+    while position * (position - 1)//2 < len(listT):
         # Remove position
         currentPositions = []
-        for gi,g in enumerate(groups):
+        for gi,g in enumerate(listT):
             gName = g.keywords["pos"]
             if position not in gName:
                 currentPositions.append(gi)
@@ -263,89 +349,110 @@ def indexPowerSetTranspositions(groups):
 
 
 def findAllSubspaces(listV, listT, powerSetMethod=None, method=2, decimals=6, debug=False):
-    # Lists of Invariant subspaces.
+    """
+    Given a list of Reynolds operators of various groups and their respective left 1-eigenspaces, compute the
+    full lattice of subspaces. See Theorem 3 or Algorithm 1 in the paper.
+
+    :param listT: List of Reynolds operator transformations for various groups (e.g., [G_rotation, G_flip]).
+    :param listV: For the Reynolds operator in listT[i], listV[i] is the corresponding 1-eigenspace already computed
+                    in `getInvariantSubspace` function.
+    :param powerSetMethod: Method to iterate over the power set of listT (i.e., the different subsets of listT).
+    :param method: Alternate methods to compute subspace intersections
+    :param decimals: Precision
+    :param debug: Print logs
+    :return: finalSubspaces: All the nonempty subspaces arranged in non-increasing order of invariance.
+             finalPowerSetConfigs: All the subsets of listT (encoded by indices) with nonempty subspace in the lattice.
+    """
 
     Wsize = listV[0].shape[0]
-    nSubspaces = len(listV)
 
     if powerSetMethod is not None:
-        # Efficient computation for the power set
-        # Do not compute those subspaces that are known to have empty intersection.
+        # Efficient iteration over the power set for permutation groups.
+        # Do not compute subspaces that are known to have empty intersection.
         indexPowerSetConfigs = powerSetMethod(listT)
     else:
         indexPowerSetConfigs = indexPowerSetGeneral(listT)
 
-    previous = np.zeros((Wsize, 0))
-    current = np.zeros((Wsize, 0))
+    complete = np.zeros((Wsize, 0))
 
-    finalPowerSets = []
+    finalSubspaces = []
     finalPowerSetConfigs = []
 
-    currentLevel = nSubspaces
-    previousLevel = currentLevel
-
-    levelBased = True
-
+    # Iterate over the power set (via indices of listT)
+    # For example: configs=[0,1,...n-1] is the full set listT, whereas configs=[2,3] is the subset {listT[2], listT[2]}.
+    # Note that len(configs) gives us the level in the lattice:
+    #       - len(configs)=n is the topmost level with highest invariance.
+    #       - len(configs)=0 is the bottommost level with no invariance.
     for configs in indexPowerSetConfigs:
+        configs_ = set(configs)
         if debug:
             print("=" * 80)
-        currentLevel = len(configs)
-        if levelBased:
-            check = np.concatenate([previous, current], axis=1)
-            if check.shape[1] > 0:
-                check = slinalg.orth(check)
 
-            if check.shape[0] == check.shape[1]:
-                # Found all bases
-                break
+        if complete.shape[1] > 0:
+            complete = slinalg.orth(complete)
 
-            if currentLevel < previousLevel:
-                if debug:
-                    print(f"Level change from {previousLevel} --> {currentLevel}")
-                previous = check
-                current = np.zeros((Wsize, 0))
-                previousLevel = currentLevel
+        if complete.shape[0] == complete.shape[1]:
+            # Found the bases for the entire space. Exit the loop.
+            break
 
         if listT is not None:
-            print("Finding subspace of ", [listT[i].__name__ for i in configs])
+            print("Finding subspace of ", [listT[i].__name__ for i in configs_])
 
-        if currentLevel > 0:
-            B = [listV[i] for i in configs]
+        # Find the intersection of all the subspaces in this particular subset (given by variable `configs`)
+        # This computes \tilde{B}_M in Theorem 3 or Equation (8) in the paper.
+        if len(configs) > 0:
+            B = [listV[i] for i in configs_]
             intersection = findIntersection(B, method=method)
         else:
             intersection = np.eye(Wsize)
 
-        if previous.shape[1] > 0:
-            intersection = projectAndRemove(intersection, previous)
+        # Remove orthogonal projections of the subspaces already computed (in higher levels).
+        # This computes B_M in Theorem 3 or Equation (8) in the paper.
+        supersetIndices = [i for i, N in enumerate(finalPowerSetConfigs) if configs_.issubset(N)]
+        if len(supersetIndices) > 0:
+            supersetSubspaces = np.concatenate([finalSubspaces[i] for i in supersetIndices],  axis=1)
+            intersection = projectAndRemove(intersection, slinalg.orth(supersetSubspaces))
 
+        # If the subspace is empty, ignore and continue.
         if np.allclose(intersection, 0, atol=10**(-decimals)):
             continue
 
+        # Make it orthonormal
         intersection = slinalg.orth(intersection)
 
+        # Add the subspace to the lattice of subspaces.
         finalPowerSetConfigs.append(configs)
-        finalPowerSets.append(intersection)
+        finalSubspaces.append(intersection)
 
-        # Add to the current level
-        if levelBased:
-            current = np.concatenate([current, intersection], axis=1)
-        else:
-            previous = np.concatenate([previous, intersection], axis=1)
-            previous = slinalg.orth(previous)
-
-            if previous.shape[0] == previous.shape[1]:
-                # Found all bases
-                break
+        # Also, append the subspace with all the subspaces computed till now.
+        complete = np.concatenate([complete, intersection], axis=1)
 
         if debug:
+            print(f"Found subspace of size: {intersection.shape}")
             print(intersection.round(decimals=6))
-            print(previous.round(decimals=6))
-    return finalPowerSets, finalPowerSetConfigs
+            print(complete.round(decimals=6))
+    return finalSubspaces, finalPowerSetConfigs
 
 
 def findAllSubspacesFromTransforms(listT, Wshape, powerSetMethod=None, method=2, decimals=6, show=False):
+    """
+    Given a list of Reynolds operators of various groups, computes their respective 1-eigenspaces
+    and calls `findAllSubspaces` function to find the full lattice of subspaces.
+
+    :param listT: List of Reynolds operator transformations for various groups (e.g., [G_rotation, G_flip]).
+    :param Wshape: Shape of input/weights.
+    :param powerSetMethod: Method to iterate over the power set of listT (i.e., the different subsets of listT).
+    :param method: Alternate methods to compute subspace intersections
+    :param decimals: Precision
+    :param show: Show the subspaces for debugging purposes.
+    :return: allSubspaces: All the nonempty subspaces arranged in non-increasing order of invariance.
+             powerSetConfigs: All the subsets of listT (encoded by indices) with nonempty subspace in the lattice.
+    """
+
     _log = utils.getLogger()
     listT = _sortTransforms(listT)
+
+    # For every i, construct 1-eigenspace for the Reynolds operator listT[i].
     listV = []
     for transform in listT:
         A, Ac, S = getInvariantSubspace(Wshape, transform)
@@ -354,18 +461,22 @@ def findAllSubspacesFromTransforms(listT, Wshape, powerSetMethod=None, method=2,
             _log.debug(f"Invariant subspace of transform {transform.__name__}: {A.shape}")
             showSubspace(A, Wshape, 1, channels=True)
 
-    powerSet, powerSetConfigs = findAllSubspaces(listV=listV, listT=listT, powerSetMethod=powerSetMethod, method=method, decimals=decimals)
+    allSubspaces, powerSetConfigs = findAllSubspaces(listV=listV, listT=listT, powerSetMethod=powerSetMethod, method=method, decimals=decimals)
 
     if show:
-        for subspace, config in zip(powerSet, powerSetConfigs):
-            ppp = [f"{t.__name__} = {c}" for c, t in zip(config, listT)]
-            _log.debug(", ".join(ppp))
+        for subspace, config in zip(allSubspaces, powerSetConfigs):
             showSubspace(subspace, Wshape, 1, channels=True)
 
-    return powerSet, powerSetConfigs
+    return allSubspaces, powerSetConfigs
 
 
 def _getBasisFileName(listT, Wshape):
+    """
+    Unique filename to store the basis
+    :param listT: Reynolds operators (as functions)
+    :param Wshape: Shape of input/weights
+    :return: Filename
+    """
     listT = _sortTransforms(listT)
     transformNames = [t.__name__ for t in listT]
     transformString = "transforms=[" + ",".join(transformNames) + "]"
@@ -378,27 +489,56 @@ def _getBasisFileName(listT, Wshape):
 
     return fileName
 
-def saveAllBasis(folder, listT, Wshape, powerSet, powerSetConfigs):
+def saveAllBasis(folder, listT, Wshape, allSubspaces, powerSetConfigs):
+    """
+    Save basis for the lattice of subspaces in given folder.
+    :param folder: Folder to save
+    :param listT: List of Reynolds operators (functions)
+    :param Wshape: Shape of input/weights.
+    :param allSubspaces: Lattice of subspaces
+    :param powerSetConfigs: The subsets of listT (encoded by indices) that have nonempty subspaces.
+    :return: Saved file name
+    """
     listT = _sortTransforms(listT)
     fileName = _getBasisFileName(listT, Wshape)
 
     pcString = ["_".join([str(pci) for pci in pc]) for pc in powerSetConfigs]
-    kwargs = dict(zip(pcString, powerSet))
+    kwargs = dict(zip(pcString, allSubspaces))
 
     np.savez(f"{os.path.join(folder, fileName)}", **kwargs)
     return fileName
 
 def loadAllBasis(folder, listT, Wshape):
+    """
+    Load basis from file
+    :param folder: Basis folder
+    :param listT: List of Reynolds operators (functions)
+    :param Wshape: Shape of input/weights
+    :return: listT: Lexicographically sorted list of Reynolds operators (functions)
+             allSubspaces: Lattice of subspaces
+             powerSetConfigs: The subsets of listT (encoded by indices) that have nonempty subspaces.
+    """
     listT = _sortTransforms(listT)
     fileName = _getBasisFileName(listT, Wshape)
-    powerSetz = np.load(f"{os.path.join(folder, fileName)}")
-    powerSetConfigs = powerSetz.files
-    powerSet = [powerSetz[key] for key in powerSetz.files]
+    loadedBasis = np.load(f"{os.path.join(folder, fileName)}")
+    powerSetConfigs = loadedBasis.files
+    allSubspaces = [loadedBasis[key] for key in loadedBasis.files]
 
-    return listT, powerSet, powerSetConfigs
+    return listT, allSubspaces, powerSetConfigs
 
 def getAllBasis(folder, listT, Wshape, powerSetMethod=None, force=False):
-    # Loads from file. Creates if file does not exists.
+    """
+    Loads from file. Creates all subspaces if file does not exists.
+    :param folder: Folder to load from or save to.
+    :param listT: List of Reynolds operators (functions)
+    :param Wshape: Shape of input/weights
+    :param powerSetMethod: Method to iterate over the power set of listT (i.e., the different subsets of listT).
+    :param force: Force re-create all subspaces.
+    :return: Same as `loadAllBasis` function.
+             listT: Lexicographically sorted list of Reynolds operators (functions)
+             allSubspaces: Lattice of subspaces
+             powerSetConfigs: The subsets of listT (encoded by indices) that have nonempty subspaces.
+    """
     _log = utils.getLogger()
     try:
         assert force==False
@@ -406,8 +546,8 @@ def getAllBasis(folder, listT, Wshape, powerSetMethod=None, force=False):
         return basis
     except:
         _log.info(f"Failed to load basis file. Creating basis file at {folder}.")
-        powerSet, powerSetConfigs = findAllSubspacesFromTransforms(listT=listT, Wshape=Wshape, powerSetMethod=powerSetMethod, show=False)
-        fileName = saveAllBasis(folder=folder, listT=listT, Wshape=Wshape, powerSet=powerSet, powerSetConfigs=powerSetConfigs)
+        allSubspaces, powerSetConfigs = findAllSubspacesFromTransforms(listT=listT, Wshape=Wshape, powerSetMethod=powerSetMethod, show=False)
+        fileName = saveAllBasis(folder=folder, listT=listT, Wshape=Wshape, allSubspaces=allSubspaces, powerSetConfigs=powerSetConfigs)
 
         _log.info(f"Saved basis file: {os.path.join(folder, fileName)}.")
 
@@ -429,14 +569,14 @@ if __name__ == '__main__':
             f = partial(G_permutation, pos=ij)
             f.__name__ = f"({ij[0]} {ij[1]})"
             listT.append(f)
-        listT, powerSet, powerSetConfigs = getAllBasis(folder=basisDir, listT=listT, Wshape=Wshape,
-                                                       powerSetMethod=indexPowerSetTranspositions, force=False)
+        listT, allSubspaces, powerSetConfigs = getAllBasis(folder=basisDir, listT=listT, Wshape=Wshape,
+                                                       powerSetMethod=indexPowerSetTranspositions, force=True)
     else:
         basisDir = os.path.join(dataDir, 'basis')
         os.makedirs(basisDir, exist_ok=True)
         inputChannels = 3
         kernelSize = (3, 3)
         Wshape = (inputChannels, kernelSize[0], kernelSize[1])
-        listT = [G_rotation, G_color_permutation, G_flip]
-        listT, powerSet, powerSetConfigs = getAllBasis(folder=basisDir, listT=listT, Wshape=Wshape, force=False)
+        listT = [G_rotation, G_color_permutation, G_verticalFlip]
+        listT, allSubspaces, powerSetConfigs = getAllBasis(folder=basisDir, listT=listT, Wshape=Wshape, force=True)
 

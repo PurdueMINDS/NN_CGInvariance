@@ -15,7 +15,13 @@ import os
 
 class CGFF(nn.Module, utils.GracefulKiller):
     """
-    CG-Feedforward network
+    CG-Feedforward network for Sequences.
+    The input is a sequence of length n and dimension d (X \in \mathbb{R}^{n\times d}).
+    First, a point-wise feedforward network \phi is applied to each element in the sequence.
+    Then we apply a CGSequenceLayer that takes as parameter a list of m groups (respective Reynolds operator functions)
+    applied on sequences. For example, we will typically use \binom{n}{2} transposition groups. The layer learns to be
+    invariant to a subset of the groups that do not affect the label.
+    See Figure 7 in the paper for an example architecture.
     """
 
     def __init__(self, **modelParams):
@@ -43,19 +49,21 @@ class CGFF(nn.Module, utils.GracefulKiller):
         outputActivation = modelParams.get("outputActivation", "none")
         weightsAcrossDims = modelParams.get("weightsAcrossDims", False)
 
+        # Folder name where the subspaces (the basis vectors) are stored.
         self.precomputedBasisFolder = modelParams.get("precomputedBasisFolder", ".")
 
+        # Fixed embedding layer for sequence elements
         self.embeddingLayer = nn.Embedding(vocabularySize, embeddingSize)
         self.embeddingLayer.weight.requires_grad = False
 
-
+        # Strength and temperature for the penalty.
         self.penaltyAlpha = modelParams.get("penaltyAlpha", 0)
         self.penaltyMode = modelParams.get("penaltyMode", "simple")
         self.penaltyT = modelParams.get("penaltyT", 1)
 
         os.makedirs(self.precomputedBasisFolder, exist_ok=True)
 
-        # Transposition groups
+        # Reynolds operators for the transposition groups
         listT = []
         for ij in list(itertools.combinations(range(self.sequenceLength), 2)):
             f = partial(IS.G_permutation, pos=ij)
@@ -71,7 +79,7 @@ class CGFF(nn.Module, utils.GracefulKiller):
             outputActivation="none",
         )
 
-        # CG-invariant layer
+        # CG-invariant sequence layer
         self.cgLayer = CGSequenceLayer(input_size=self.sequenceLength,
                                        input_dimension=phiLayerDims[-1],
                                        hidden_dimension=hiddenDimension,
@@ -80,7 +88,7 @@ class CGFF(nn.Module, utils.GracefulKiller):
                                        weightsAcrossDims=weightsAcrossDims,
                                        bias=True)
 
-        # Dense layer
+        # Dense layer after the CG-invariant sequence layer
         self.rho = MLP(
             layerDims=[hiddenDimension] + rhoLayerDims,
             dropout=dropout,
@@ -189,7 +197,6 @@ class CGFF(nn.Module, utils.GracefulKiller):
                     or epoch >= numEpochs
                     or epoch % validationFrequency == 0
             ) and validLoss < bestValidLoss:
-                # saved = "(Saved to {})".format(fileName)
                 saved = "(Saved model)"
                 torch.save(self, fileName)
                 if validLoss < 0.995 * bestValidLoss :
